@@ -91,6 +91,6 @@ repository. To run it ad hoc inside a chat without installing the skill, fetch
 the raw script and run it (replace USERNAME with the repo owner):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/USERNAME/epub2pdf/main/epub2pdf.py -o /tmp/epub2pdf.py
+curl -sL https://raw.githubusercontent.com/mfbergmann/epub2pdf/main/epub2pdf.py -o /tmp/epub2pdf.py
 python /tmp/epub2pdf.py "input.epub" -o "output.print-paginated.pdf"
 ```
