@@ -137,6 +137,47 @@ img {{ max-width: 100%; height: auto; }} h1,h2,h3 {{ break-after: avoid; }}
   padding-bottom: 2px; margin-bottom: 0.7em; }"""
     return base
 
+class NoPageListError(Exception):
+    pass
+
+def convert(epub_path, output=None, page_size="6x9", margin=0.7,
+            font="Georgia, 'Times New Roman', serif", font_size=10.5,
+            leading=1.5, compact=False, force=False):
+    """Convert EPUB to print-paginated PDF. Returns (output_path, n_pages, title, author).
+
+    Raises NoPageListError if the EPUB has no page-break markers and force is False.
+    """
+    out = output or re.sub(r"\.epub$", "", epub_path, flags=re.I) + ".print-paginated.pdf"
+
+    class Args:
+        pass
+    a = Args()
+    a.page_size, a.margin, a.font = page_size, margin, font
+    a.font_size, a.leading, a.compact = font_size, leading, compact
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with zipfile.ZipFile(epub_path) as z:
+            z.extractall(tmp)
+        opf_rel = find_opf(tmp)
+        opf_dir = os.path.dirname(opf_rel)
+        manifest, spine, title, author = parse_opf(tmp, opf_rel)
+        labels = build_label_map(tmp, opf_dir, manifest)
+        chunks, n = transform(tmp, opf_dir, manifest, spine, labels)
+        if n == 0 and not force:
+            raise NoPageListError(
+                "No page-break markers found — this EPUB has no print page list.")
+        css_files = "".join(
+            f'<link rel="stylesheet" href="{h}"/>'
+            for (h, m, p) in manifest.values() if m == "text/css")
+        html = (f'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>'
+                f'<title>{title or os.path.basename(epub_path)}</title>'
+                f'<meta name="author" content="{author}"/>{css_files}'
+                f'<style>{css(a)}</style></head><body>{"".join(chunks)}</body></html>')
+        from weasyprint import HTML
+        base = os.path.join(tmp, opf_dir) + os.sep
+        HTML(string=html, base_url=base).write_pdf(out)
+    return out, n, title, author
+
 def main():
     ap = argparse.ArgumentParser(description="EPUB -> print-paginated PDF using the embedded print page list.")
     ap.add_argument("epub")
@@ -149,31 +190,14 @@ def main():
     ap.add_argument("--compact", action="store_true", help="inline page markers, normal-length PDF")
     ap.add_argument("--force", action="store_true", help="render even if no page list is found")
     args = ap.parse_args()
-
-    out = args.output or re.sub(r"\.epub$", "", args.epub, flags=re.I) + ".print-paginated.pdf"
-    with tempfile.TemporaryDirectory() as tmp:
-        with zipfile.ZipFile(args.epub) as z:
-            z.extractall(tmp)
-        opf_rel = find_opf(tmp)
-        opf_dir = os.path.dirname(opf_rel)
-        manifest, spine, title, author = parse_opf(tmp, opf_rel)
-        labels = build_label_map(tmp, opf_dir, manifest)
-        chunks, n = transform(tmp, opf_dir, manifest, spine, labels)
-        if n == 0 and not args.force:
-            sys.exit("No page-break markers found — this EPUB has no print page list. "
-                     "Re-run with --force to convert without print pagination.")
-        css_files = "".join(
-            f'<link rel="stylesheet" href="{h}"/>'
-            for (h, m, p) in manifest.values() if m == "text/css")
-        html = (f'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>'
-                f'<title>{title or os.path.basename(args.epub)}</title>'
-                f'<meta name="author" content="{author}"/>{css_files}'
-                f'<style>{css(args)}</style></head><body>{"".join(chunks)}</body></html>')
-        from weasyprint import HTML
-        base = os.path.join(tmp, opf_dir) + os.sep
-        HTML(string=html, base_url=base).write_pdf(out)
+    try:
+        out, n, title, author = convert(
+            args.epub, args.output, args.page_size, args.margin,
+            args.font, args.font_size, args.leading, args.compact, args.force)
         print(f"OK  {n} print pages | title: {title or '(none)'} | author: {author or '(none)'}")
         print(f"--> {out}")
+    except NoPageListError as e:
+        sys.exit(f"{e} Re-run with --force to convert without print pagination.")
 
 if __name__ == "__main__":
     main()
