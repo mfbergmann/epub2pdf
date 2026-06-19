@@ -1,0 +1,95 @@
+name: Build desktop app
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: epub2pdf-mac
+          - os: windows-latest
+            artifact: epub2pdf-windows
+          - os: ubuntu-latest
+            artifact: epub2pdf-linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pango cairo gdk-pixbuf libffi
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 \
+            libcairo2 libgdk-pixbuf-2.0-0 python3-tk
+
+      - name: Install Python deps
+        run: pip install pyinstaller weasyprint beautifulsoup4 lxml
+
+      - name: Build with PyInstaller
+        run: >
+          pyinstaller
+          --name epub2pdf
+          --windowed
+          --onedir
+          --collect-all weasyprint
+          --hidden-import epub2pdf
+          --add-data "epub2pdf.py:."
+          epub2pdf_gui.py
+
+      - name: Zip output (macOS)
+        if: runner.os == 'macOS'
+        run: cd dist && zip -r ../epub2pdf-mac.zip epub2pdf.app
+
+      - name: Zip output (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist\epub2pdf -DestinationPath epub2pdf-windows.zip
+
+      - name: Tar output (Linux)
+        if: runner.os == 'Linux'
+        run: cd dist && tar czf ../epub2pdf-linux.tar.gz epub2pdf
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            epub2pdf-mac.zip
+            epub2pdf-windows.zip
+            epub2pdf-linux.tar.gz
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            epub2pdf-mac.zip
+            epub2pdf-windows.zip
+            epub2pdf-linux.tar.gz

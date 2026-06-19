@@ -32,7 +32,19 @@ If neither command prints a match, the EPUB has no print pagination data and
 epub2pdf will refuse to run (you can override with `--force`, but the output
 won't have meaningful page numbers).
 
-## Installation
+## Desktop app (no terminal required)
+
+Download the latest build for your platform from the
+[Releases](https://github.com/mfbergmann/epub2pdf/releases) page:
+
+- **macOS:** `epub2pdf-mac.zip` — unzip, move to Applications, double-click
+- **Windows:** `epub2pdf-windows.zip` — extract and run `epub2pdf.exe`
+- **Linux:** `epub2pdf-linux.tar.gz` — extract and run `epub2pdf`
+
+Pick an EPUB, click **Convert to PDF**, done. The app will tell you if the EPUB
+doesn't have a print page list and offer to convert anyway.
+
+## Command-line installation
 
 ### With [uv](https://docs.astral.sh/uv/) (simplest)
 
