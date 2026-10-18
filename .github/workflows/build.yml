@@ -35,7 +35,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Every Python step below calls this interpreter by path. On Windows the
+      # MSYS2 Pango packages drag in MSYS2's own python.exe, and putting
+      # mingw64\bin on PATH (needed so find_library sees the DLLs) lets that
+      # one shadow a bare `python` — which then lacks everything pip installed.
       - uses: actions/setup-python@v5
+        id: py
         with:
           python-version: "3.12"
 
@@ -77,7 +82,7 @@ jobs:
         run: echo "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin" >> $env:GITHUB_PATH
 
       - name: Install Python deps
-        run: pip install pyinstaller weasyprint beautifulsoup4 lxml pypdf
+        run: ${{ steps.py.outputs.python-path }} -m pip install pyinstaller weasyprint beautifulsoup4 lxml pypdf
 
       # DYLD_FALLBACK_LIBRARY_PATH is the macOS half of the discoverability
       # problem. Homebrew's own CPython patches /opt/homebrew/lib into ctypes'
@@ -88,10 +93,10 @@ jobs:
       - name: Build with PyInstaller
         env:
           DYLD_FALLBACK_LIBRARY_PATH: /opt/homebrew/lib:/usr/local/lib:/usr/lib
-        run: pyinstaller --noconfirm --clean epub2pdf.spec
+        run: ${{ steps.py.outputs.python-path }} -m PyInstaller --noconfirm --clean epub2pdf.spec
 
       - name: Verify the bundle is self-contained
-        run: python verify_bundle.py dist
+        run: ${{ steps.py.outputs.python-path }} verify_bundle.py dist
 
       # ditto, not zip: it preserves the ad-hoc code signature and symlinks
       # inside the .app, which arm64 macOS requires in order to run it at all.
