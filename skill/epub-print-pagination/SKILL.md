@@ -45,9 +45,9 @@ this SKILL.md). Ensure dependencies are available first:
 pip install weasyprint beautifulsoup4 lxml --break-system-packages
 ```
 
-WeasyPrint also needs the system libraries Pango, Cairo, and GDK-Pixbuf, which
+WeasyPrint also needs the system library Pango (with HarfBuzz and fontconfig), which
 are normally already present in Claude's sandbox. If the import fails, install
-them with apt (libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0).
+them with apt (libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1).
 
 Then convert:
 

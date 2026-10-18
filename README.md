@@ -34,15 +34,35 @@ won't have meaningful page numbers).
 
 ## Desktop app (no terminal required)
 
-Download the latest build for your platform from the
+Self-contained — nothing else to install, no Python, no Homebrew. Download the
+latest build for your platform from the
 [Releases](https://github.com/mfbergmann/epub2pdf/releases) page:
 
-- **macOS:** `epub2pdf-mac.zip` — unzip, move to Applications, double-click
+- **macOS (Apple Silicon):** `epub2pdf-macos-arm64.zip` — unzip, move to Applications, double-click
 - **Windows:** `epub2pdf-windows.zip` — extract and run `epub2pdf.exe`
 - **Linux:** `epub2pdf-linux.tar.gz` — extract and run `epub2pdf`
 
 Pick an EPUB, click **Convert to PDF**, done. The app will tell you if the EPUB
 doesn't have a print page list and offer to convert anyway.
+
+**First launch on macOS:** the app isn't signed with a paid Apple Developer ID,
+so Gatekeeper will refuse it on a double-click. Right-click the app and choose
+**Open**, then confirm — once. If macOS insists the app is damaged, clear the
+download quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/epub2pdf.app
+```
+
+**Intel Macs** aren't covered by that build — the bundled text-rendering
+libraries are Apple Silicon only. Use the command line or Docker below.
+
+The app doubles as the command-line tool if you hand it arguments, which is
+handy when you want the options the GUI doesn't expose:
+
+```bash
+/Applications/epub2pdf.app/Contents/MacOS/epub2pdf book.epub --compact
+```
 
 ## Command-line installation
 
@@ -55,8 +75,8 @@ uv run epub2pdf.py book.epub
 uv handles the Python packages automatically. You still need WeasyPrint's system
 libraries:
 
-- **Debian / Ubuntu:** `sudo apt-get install libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0`
-- **macOS:** `brew install pango cairo gdk-pixbuf libffi`
+- **Debian / Ubuntu:** `sudo apt-get install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1`
+- **macOS:** `brew install pango`
 
 ### With pip
 

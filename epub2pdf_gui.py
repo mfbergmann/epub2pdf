@@ -174,6 +174,15 @@ class App:
 
 
 def main():
+    # The frozen app is the only build most people ever get, so let it act as
+    # the command-line tool too when it's handed arguments. That also lets CI
+    # smoke-test the exact artifact it is about to publish, rather than a
+    # separately-built stand-in.
+    args = [a for a in sys.argv[1:] if not a.startswith("-psn_")]  # Finder adds -psn_*
+    if args:
+        from epub2pdf import main as cli_main
+        sys.argv = [sys.argv[0]] + args
+        return cli_main()
     root = tk.Tk()
     App(root)
     root.mainloop()

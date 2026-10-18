@@ -10,9 +10,10 @@ NCX pageList). Each print-page boundary becomes a labelled break, so a quote
 on print page N lands on the sheet labelled N. Intended for citation use in
 reference managers.
 
-Requires the system libraries WeasyPrint depends on (Pango/Cairo/GDK-Pixbuf):
-  - Debian/Ubuntu: apt-get install libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0
-  - macOS (Homebrew): brew install pango cairo gdk-pixbuf libffi
+Requires the system libraries WeasyPrint depends on (Pango, which pulls in
+HarfBuzz, fontconfig and GLib):
+  - Debian/Ubuntu: apt-get install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1
+  - macOS (Homebrew): brew install pango
   - Or just use the bundled Dockerfile, which has them baked in.
 
 Usage:
@@ -68,13 +69,21 @@ def build_label_map(root, opf_dir, manifest):
                 for tgt in soup.find_all("pageTarget"):
                     c = tgt.find("content")
                     if c and "#" in (c.get("src") or ""):
-                        labels[c["src"].split("#", 1)[1]] = tgt.get("value", "")
+                        # @value is optional in NCX; the displayed label lives in
+                        # navLabel/text, and is the one that carries roman numerals.
+                        nl = tgt.find("navLabel")
+                        lbl = (nl.get_text(strip=True) if nl else "") or (tgt.get("value") or "")
+                        labels[c["src"].split("#", 1)[1]] = lbl
     return labels
 
 def label_for(el, labels):
-    return (el.get("aria-label")
-            or labels.get(el.get("id", ""))
-            or (el.get("id", "")[3:] if el.get("id", "").startswith("pg_") else el.get("id", "")) or "?")
+    ident = el.get("id", "")
+    lbl = (el.get("aria-label")
+           or labels.get(ident)
+           or el.get("title")             # EPUB pagebreak markers carry the label here
+           or ident)
+    # Some publishers set title/id to "page_12" instead of the bare label "12".
+    return re.sub(r"^(?:pg|page)[-_]", "", lbl) or "?"
 
 def transform(root, opf_dir, manifest, spine, labels):
     chunks, n = [], 0
@@ -140,6 +149,36 @@ img {{ max-width: 100%; height: auto; }} h1,h2,h3 {{ break-after: avoid; }}
 class NoPageListError(Exception):
     pass
 
+class MissingLibrariesError(Exception):
+    pass
+
+def load_weasyprint():
+    """Import WeasyPrint, first making Homebrew/MacPorts' Pango findable on macOS.
+
+    WeasyPrint dlopen()s Pango/GObject/HarfBuzz/fontconfig by name, which falls
+    back to ctypes.util.find_library(). Homebrew's own Python searches
+    /opt/homebrew/lib there, but uv's and python.org's builds do not, so an
+    installed Pango goes unfound. The frozen app ships its own copies, so leave
+    it alone rather than let it pick up whatever the host has.
+    """
+    if sys.platform == "darwin" and not getattr(sys, "frozen", False):
+        from ctypes.macholib import dyld
+        for d in ("/opt/homebrew/lib", "/usr/local/lib", "/opt/local/lib"):
+            if os.path.isdir(d) and d not in dyld.DEFAULT_LIBRARY_FALLBACK:
+                dyld.DEFAULT_LIBRARY_FALLBACK.append(d)
+    try:
+        from weasyprint import HTML
+    except OSError as e:
+        hint = {"darwin": "brew install pango",
+                "linux": "apt-get install libpango-1.0-0 libpangoft2-1.0-0 "
+                         "libharfbuzz0b libfontconfig1"}.get(
+            sys.platform, "see https://doc.courtbouillon.org/weasyprint/stable/"
+                          "first_steps.html#installation")
+        raise MissingLibrariesError(
+            f"WeasyPrint couldn't load the Pango text libraries it needs ({e}).\n"
+            f"Install them with: {hint}") from e
+    return HTML
+
 def convert(epub_path, output=None, page_size="6x9", margin=0.7,
             font="Georgia, 'Times New Roman', serif", font_size=10.5,
             leading=1.5, compact=False, force=False):
@@ -173,7 +212,7 @@ def convert(epub_path, output=None, page_size="6x9", margin=0.7,
                 f'<title>{title or os.path.basename(epub_path)}</title>'
                 f'<meta name="author" content="{author}"/>{css_files}'
                 f'<style>{css(a)}</style></head><body>{"".join(chunks)}</body></html>')
-        from weasyprint import HTML
+        HTML = load_weasyprint()
         base = os.path.join(tmp, opf_dir) + os.sep
         HTML(string=html, base_url=base).write_pdf(out)
     return out, n, title, author
@@ -198,6 +237,8 @@ def main():
         print(f"--> {out}")
     except NoPageListError as e:
         sys.exit(f"{e} Re-run with --force to convert without print pagination.")
+    except MissingLibrariesError as e:
+        sys.exit(str(e))
 
 if __name__ == "__main__":
     main()
