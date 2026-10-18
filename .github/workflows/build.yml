@@ -2,7 +2,9 @@ name: Build desktop app
 
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
+  pull_request:
   workflow_dispatch:
     inputs:
       version:
@@ -15,14 +17,18 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # macOS runners are Apple Silicon, and the Pango stack we bundle comes
+          # from Homebrew, which is per-architecture — so this artifact is arm64
+          # only. Intel Macs need the CLI or the Dockerfile.
           - os: macos-latest
-            artifact: epub2pdf-mac
+            artifact: epub2pdf-macos-arm64.zip
           - os: windows-latest
-            artifact: epub2pdf-windows
+            artifact: epub2pdf-windows.zip
           - os: ubuntu-latest
-            artifact: epub2pdf-linux
+            artifact: epub2pdf-linux.tar.gz
 
     runs-on: ${{ matrix.os }}
 
@@ -33,52 +39,80 @@ jobs:
         with:
           python-version: "3.12"
 
+      # WeasyPrint dlopen()s Pango/GObject/HarfBuzz/fontconfig by name at
+      # runtime. PyInstaller's weasyprint hook can only bundle them if they are
+      # discoverable by ctypes.util.find_library() *in this build environment*,
+      # so each platform below has to put them somewhere it looks. If that
+      # fails, the hook warns and the build still succeeds — verify_bundle.py at
+      # the end is what actually stops a broken artifact from being published.
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install pango cairo gdk-pixbuf libffi
+        run: brew install pango harfbuzz fontconfig glib libffi
 
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 \
-            libcairo2 libgdk-pixbuf-2.0-0 python3-tk
+          sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 \
+            libharfbuzz0b libfontconfig1 libglib2.0-0 python3-tk
+
+      # Windows has no system Pango. MSYS2's mingw64 packages are the runtime
+      # WeasyPrint's own install guide points at; putting mingw64\bin on PATH is
+      # what makes find_library() (which searches PATH on Windows) see them.
+      - name: Install system deps (Windows)
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-pango
+            mingw-w64-x86_64-harfbuzz
+            mingw-w64-x86_64-fontconfig
+            mingw-w64-x86_64-glib2
+
+      - name: Put GTK libraries on PATH (Windows)
+        if: runner.os == 'Windows'
+        run: echo "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin" >> $env:GITHUB_PATH
 
       - name: Install Python deps
-        run: pip install pyinstaller weasyprint beautifulsoup4 lxml
+        run: pip install pyinstaller weasyprint beautifulsoup4 lxml pypdf
 
+      # DYLD_FALLBACK_LIBRARY_PATH is the macOS half of the discoverability
+      # problem. Homebrew's own CPython patches /opt/homebrew/lib into ctypes'
+      # dyld fallback list, but actions/setup-python ships stock CPython, which
+      # does not — so find_library() returns None for every one of these
+      # libraries and the hook silently bundles nothing. This was the bug that
+      # shipped a Mac app which died on first conversion.
       - name: Build with PyInstaller
-        run: >
-          pyinstaller
-          --name epub2pdf
-          --windowed
-          --onedir
-          --collect-all weasyprint
-          --hidden-import epub2pdf
-          --add-data "epub2pdf.py:."
-          epub2pdf_gui.py
+        env:
+          DYLD_FALLBACK_LIBRARY_PATH: /opt/homebrew/lib:/usr/local/lib:/usr/lib
+        run: pyinstaller --noconfirm --clean epub2pdf.spec
 
+      - name: Verify the bundle is self-contained
+        run: python verify_bundle.py dist
+
+      # ditto, not zip: it preserves the ad-hoc code signature and symlinks
+      # inside the .app, which arm64 macOS requires in order to run it at all.
       - name: Zip output (macOS)
         if: runner.os == 'macOS'
-        run: cd dist && zip -r ../epub2pdf-mac.zip epub2pdf.app
+        run: ditto -c -k --keepParent --sequesterRsrc dist/epub2pdf.app ${{ matrix.artifact }}
 
       - name: Zip output (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path dist\epub2pdf -DestinationPath epub2pdf-windows.zip
+        run: Compress-Archive -Path dist\epub2pdf -DestinationPath ${{ matrix.artifact }}
 
       - name: Tar output (Linux)
         if: runner.os == 'Linux'
-        run: cd dist && tar czf ../epub2pdf-linux.tar.gz epub2pdf
+        run: tar czf ${{ matrix.artifact }} -C dist epub2pdf
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            epub2pdf-mac.zip
-            epub2pdf-windows.zip
-            epub2pdf-linux.tar.gz
-          if-no-files-found: ignore
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
 
   release:
     needs: build
@@ -96,6 +130,6 @@ jobs:
           draft: false
           make_latest: true
           files: |
-            epub2pdf-mac.zip
+            epub2pdf-macos-arm64.zip
             epub2pdf-windows.zip
             epub2pdf-linux.tar.gz

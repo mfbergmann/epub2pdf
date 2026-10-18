@@ -8,9 +8,10 @@ markers or NCX `pageList`); otherwise it refuses unless `--force` is given.
 ## Usage
     pip install weasyprint beautifulsoup4 lxml        # or: uv run epub2pdf.py ...
     python epub2pdf.py "book.epub" -o "book.print-paginated.pdf"
-WeasyPrint needs system libs Pango/Cairo/GDK-Pixbuf (Debian: libpango-1.0-0
-libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0; macOS: brew install pango cairo
-gdk-pixbuf libffi). Or use the bundled Dockerfile.
+WeasyPrint needs system libs Pango/HarfBuzz/fontconfig (Debian: libpango-1.0-0
+libpangoft2-1.0-0 libharfbuzz0b libfontconfig1; macOS: brew install pango). On macOS the
+script adds Homebrew/MacPorts lib dirs to the dyld search itself, since uv's and
+python.org's Pythons don't look there. Or use the bundled Dockerfile.
 
 ## Precondition check (always run first)
     unzip -p "book.epub" '*nav*' | grep -i 'page-list'    # EPUB 3
@@ -34,7 +35,21 @@ Output pages > 0; extract text and confirm a "print p. N" footer sits on the exp
 
 ## Repo layout & sync rule
 - `epub2pdf.py` — the converter (source of truth)
+- `epub2pdf_gui.py` — desktop GUI; also the frozen app's entry point, and dispatches
+  to the CLI when given arguments
+- `epub2pdf.spec` / `rthook_weasyprint.py` — PyInstaller build; these exist to make the
+  released app self-contained
+- `verify_bundle.py` — run against `dist/` after a build; asserts the app is self-contained
 - `skill/epub-print-pagination/` — packaged Claude skill; bundles its own copy of the script
 - `Dockerfile`, `README.md`
 When you edit `epub2pdf.py`, also copy it to `skill/epub-print-pagination/scripts/epub2pdf.py`
 so the installed skill stays in sync.
+
+## Packaging trap (read before touching the build)
+WeasyPrint `dlopen`s Pango/GObject/HarfBuzz/fontconfig by name; PyInstaller cannot see
+them statically. Its weasyprint hook bundles them only if `ctypes.util.find_library()`
+finds them **at build time**, and when it doesn't it just logs a warning — the build
+still succeeds and ships an app that dies on the first conversion. WeasyPrint is also
+imported lazily inside `convert()`, so the app launches fine and only fails on Convert.
+A green build proves nothing here; `verify_bundle.py` is the real gate, and CI runs it
+before uploading anything. Never make it non-blocking.
